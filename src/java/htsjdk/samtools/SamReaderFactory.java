@@ -50,6 +50,8 @@ import java.util.zip.GZIPInputStream;
  */
 public abstract class SamReaderFactory {
 
+    private static ValidationStringency defaultValidationStringency = ValidationStringency.DEFAULT_STRINGENCY;
+
     abstract public SamReader open(final File file);
 
     abstract public SamReader open(final SamInputResource resource);
@@ -68,8 +70,14 @@ public abstract class SamReaderFactory {
     /** Set this factory's {@link ValidationStringency} to the provided one, then returns itself. */
     abstract public SamReaderFactory validationStringency(final ValidationStringency validationStringency);
 
-    private static final SamReaderFactoryImpl DEFAULT =
-            new SamReaderFactoryImpl(Option.DEFAULTS, ValidationStringency.DEFAULT_STRINGENCY, DefaultSAMRecordFactory.getInstance());
+    private static SamReaderFactoryImpl DEFAULT =
+            new SamReaderFactoryImpl(Option.DEFAULTS, defaultValidationStringency, DefaultSAMRecordFactory.getInstance());
+
+    public static void setDefaultValidationStringency(final ValidationStringency defaultValidationStringency) {
+        SamReaderFactory.defaultValidationStringency = defaultValidationStringency;
+        // The default may have changed, so reset the default SamReader
+        DEFAULT = new SamReaderFactoryImpl(Option.DEFAULTS, defaultValidationStringency, DefaultSAMRecordFactory.getInstance());
+    }
 
     /** Creates a copy of the default {@link SamReaderFactory}. */
     public static SamReaderFactory makeDefault() {
@@ -88,11 +96,13 @@ public abstract class SamReaderFactory {
         private final EnumSet<Option> enabledOptions;
         private ValidationStringency validationStringency;
         private SAMRecordFactory samRecordFactory;
+        private CustomReaderFactory customReaderFactory;
 
         private SamReaderFactoryImpl(final EnumSet<Option> enabledOptions, final ValidationStringency validationStringency, final SAMRecordFactory samRecordFactory) {
             this.enabledOptions = EnumSet.copyOf(enabledOptions);
             this.samRecordFactory = samRecordFactory;
             this.validationStringency = validationStringency;
+            this.customReaderFactory = CustomReaderFactory.getInstance();
         }
 
         @Override
@@ -144,6 +154,13 @@ public abstract class SamReaderFactory {
                 final boolean indexDefined = indexMaybe != null;
 
                 final InputResource.Type type = data.type();
+                if (type == InputResource.Type.URL) {
+                  SamReader reader = customReaderFactory.maybeOpen(
+                      data.asUrl());
+                  if (reader != null) {
+                    return reader;
+                  }
+                }
                 if (type == InputResource.Type.SEEKABLE_STREAM || type == InputResource.Type.URL) {
                     if (SamStreams.sourceLikeBam(data.asUnbufferedSeekableStream())) {
                         final SeekableStream bufferedIndexStream;

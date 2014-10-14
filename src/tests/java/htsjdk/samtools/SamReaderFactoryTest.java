@@ -5,6 +5,7 @@ import htsjdk.samtools.util.Iterables;
 import htsjdk.samtools.util.Log;
 import htsjdk.samtools.util.RuntimeIOException;
 import htsjdk.samtools.util.StopWatch;
+
 import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -34,15 +35,44 @@ public class SamReaderFactoryTest {
         reader.close();
     }
 
+    private int countRecordsInQueryInterval(final SamReader reader, final QueryInterval query) {
+        final SAMRecordIterator iter = reader.queryOverlapping(new QueryInterval[] { query });
+        int count = 0;
+        while (iter.hasNext()) {
+            iter.next();
+            count++;
+        }
+        iter.close();
+        return count;
+    }
+
+    // See https://github.com/samtools/htsjdk/issues/76
+    @Test(dataProvider = "queryIntervalIssue76TestCases")
+    public void queryIntervalIssue76(final String sequenceName, final int start, final int end, final int expectedCount) throws IOException {
+        final File input = new File(TEST_DATA_DIR, "issue76.bam");
+        final SamReader reader = SamReaderFactory.makeDefault().open(input);
+        final QueryInterval interval = new QueryInterval(reader.getFileHeader().getSequence(sequenceName).getSequenceIndex(), start, end);
+        Assert.assertEquals(countRecordsInQueryInterval(reader, interval), expectedCount);
+        reader.close();
+    }
+
+    @DataProvider(name = "queryIntervalIssue76TestCases")
+    public Object[][] queryIntervalIssue76TestCases() {
+        return new Object[][]{
+                {"1", 11966, 11966, 2},
+                {"1", 11966, 11967, 2},
+                {"1", 11967, 11967, 1}
+        };
+    }
+
     @DataProvider(name = "variousFormatReaderTestCases")
     public Object[][] variousFormatReaderTestCases() {
-        final Object[][] scenarios = new Object[][]{
+        return new Object[][]{
                 {"block_compressed.sam.gz"},
                 {"uncompressed.sam"},
                 {"compressed.sam.gz"},
                 {"compressed.bam"},
         };
-        return scenarios;
     }
 
     // Tests for the SAMRecordFactory usage
@@ -93,7 +123,7 @@ public class SamReaderFactoryTest {
         try {
             bamUrl = new URL("http://www.broadinstitute.org/~picard/testdata/index_test.bam");
             bamIndexUrl = new URL("http://www.broadinstitute.org/~picard/testdata/index_test.bam.bai");
-        } catch (MalformedURLException e) {
+        } catch (final MalformedURLException e) {
             throw new RuntimeException(e);
         }
     }
@@ -192,5 +222,35 @@ public class SamReaderFactoryTest {
             LOG.info("Skipping query operation: no index.");
         }
         reader.close();
+    }
+    
+    @Test
+    public void customReaderFactoryTest() throws IOException {
+        try {
+          CustomReaderFactory.setInstance(new CustomReaderFactory(
+              "https://www.googleapis.com/genomics/v1beta/reads/," +
+              "htsjdk.samtools.SamReaderFactoryTest$TestReaderFactory"));
+          final SamReader reader = SamReaderFactory.makeDefault().open(
+              SamInputResource.of(new URL(
+                  "https://www.googleapis.com/genomics/v1beta/reads/?uncompressed.sam")));
+          int i = 0;
+          for (@SuppressWarnings("unused") final SAMRecord ignored : reader) {
+              ++i;
+          }
+          reader.close();
+  
+          Assert.assertTrue(i > 0);
+        } finally {
+          CustomReaderFactory.resetToDefaultInstance();
+        }
+    }
+    
+    public static class TestReaderFactory implements CustomReaderFactory.ICustomReaderFactory {
+      @Override
+      public SamReader open(URL url) {
+        final File file = new File(TEST_DATA_DIR, url.getQuery());
+        LOG.info("Opening customr reader for " + file.toString());
+        return SamReaderFactory.makeDefault().open(file);
+      }
     }
 }

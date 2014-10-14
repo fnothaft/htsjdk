@@ -4,6 +4,7 @@ import htsjdk.samtools.SAMException;
 import htsjdk.samtools.SAMFileReader;
 import htsjdk.samtools.SAMRecord;
 import htsjdk.samtools.SAMRecordIterator;
+import htsjdk.samtools.SAMUtils;
 import htsjdk.samtools.fastq.FastqReader;
 import htsjdk.samtools.fastq.FastqRecord;
 
@@ -121,8 +122,14 @@ public class QualityEncodingDetector {
          * Since we desire original scores here (whatever was in the file to begin with), we effectively undo this
          * transformation by asking SAMRecord to convert the quality back into the ASCII that was read in the file.
          */
+        public void add(final SAMRecord samRecord, final boolean useOriginalQualities) {
+            addAsciiQuality(useOriginalQualities && samRecord.getOriginalBaseQualities() != null
+                    ? SAMUtils.phredToFastq(samRecord.getOriginalBaseQualities()).getBytes()
+                    : samRecord.getBaseQualityString().getBytes());
+        }
+
         public void add(final SAMRecord samRecord) {
-            addAsciiQuality(samRecord.getBaseQualityString().getBytes());
+            add(samRecord, false);
         }
 
         private void addAsciiQuality(final byte... asciiQualities) {
@@ -151,17 +158,28 @@ public class QualityEncodingDetector {
      * @return The number of records read
      */
     public long add(final long maxRecords, final SAMFileReader reader) {
-        final SAMRecordIterator iterator = reader.iterator();
+        return add(maxRecords, reader.iterator());
+    }
+
+    /**
+     * Adds the provided iterator's records (optionally using the original qualities) to the detector.
+     * @return The number of records read
+     */
+    public long add(final long maxRecords, final CloseableIterator<SAMRecord> iterator, final boolean useOriginalQualities) {
         long recordCount = 0;
         try {
             while (iterator.hasNext() && recordCount++ != maxRecords) {
-                this.add(iterator.next());
+                this.add(iterator.next(), useOriginalQualities);
             }
 
             return recordCount;
         } finally {
             iterator.close();
         }
+    }
+
+    public long add(final long maxRecords, final CloseableIterator<SAMRecord> iterator) {
+        return add(maxRecords, iterator, false);
     }
 
     /**
@@ -174,8 +192,12 @@ public class QualityEncodingDetector {
     /**
      * Adds the provided record's qualities to the detector.
      */
+    public void add(final SAMRecord samRecord, final boolean useOriginalQualities) {
+        this.qualityAggregator.add(samRecord, useOriginalQualities);
+    }
+
     public void add(final SAMRecord samRecord) {
-        this.qualityAggregator.add(samRecord);
+        this.add(samRecord, false);
     }
 
     /**
@@ -295,21 +317,32 @@ public class QualityEncodingDetector {
      * Reads through the records in the provided SAM reader and uses their quality scores to determine the quality
      * format used in the SAM.
      *
-     * @param reader     The SAM reader from which records are to be read
+     * @param iterator    The iterator from which SAM records are to be read
      * @param maxRecords The maximum number of records to read from the reader before making a determination (a guess,
+     * @param useOriginalQualities whether to use the original qualities (if available) rather than the current ones
      *                   so more records is better)
      * @return The determined quality format
      */
-    public static FastqQualityFormat detect(final long maxRecords, final SAMFileReader reader) {
+    public static FastqQualityFormat detect(final long maxRecords, final CloseableIterator<SAMRecord> iterator, final boolean useOriginalQualities) {
         final QualityEncodingDetector detector = new QualityEncodingDetector();
-        final long recordCount = detector.add(maxRecords, reader);
-        log.debug(String.format("Read %s records from %s.", recordCount, reader));
+        final long recordCount = detector.add(maxRecords, iterator, useOriginalQualities);
+        log.debug(String.format("Read %s records.", recordCount));
         return detector.generateBestGuess(FileContext.SAM, null);
+
+    }
+
+    public static FastqQualityFormat detect(final long maxRecords, final CloseableIterator<SAMRecord> iterator) {
+        return detect(maxRecords, iterator, false);
+    }
+
+    public static FastqQualityFormat detect(final long maxRecords, final SAMFileReader reader) {
+        return detect(maxRecords, reader.iterator());
     }
 
     public static FastqQualityFormat detect(final SAMFileReader reader) {
         return detect(DEFAULT_MAX_RECORDS_TO_ITERATE, reader);
     }
+
 
     /**
      * Reads through the records in the provided SAM reader and uses their quality scores to sanity check the expected
@@ -319,7 +352,7 @@ public class QualityEncodingDetector {
     public static FastqQualityFormat detect(final SAMFileReader reader, final FastqQualityFormat expectedQualityFormat) {
         //sanity check expectedQuality
         final QualityEncodingDetector detector = new QualityEncodingDetector();
-        final long recordCount = detector.add(DEFAULT_MAX_RECORDS_TO_ITERATE, reader);
+        final long recordCount = detector.add(DEFAULT_MAX_RECORDS_TO_ITERATE, reader.iterator());
         log.debug(String.format("Read %s records from %s.", recordCount, reader));
         return detector.generateBestGuess(FileContext.SAM, expectedQualityFormat);
     }

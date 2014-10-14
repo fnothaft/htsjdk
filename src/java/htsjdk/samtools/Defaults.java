@@ -47,6 +47,12 @@ public class Defaults {
 	 * given MD5 checksum. Must contain one and only one string placeholder.
 	 */
 	public static final String EBI_REFERENCE_SEVICE_URL_MASK;
+    /** Custom reader factory able to handle URL based resources like ga4gh.
+     *  Expected format: <url prefix>,<fully qualified factory class name>[,<jar file name>]
+     *  E.g. https://www.googleapis.com/genomics/v1beta/reads/,com.google.genomics.ReaderFactory
+     *  OR https://www.googleapis.com/genomics/v1beta/reads/,com.google.genomics.ReaderFactory,/tmp/genomics.jar
+     */
+    public static final String CUSTOM_READER_FACTORY;
 
     static {
         CREATE_INDEX      = getBooleanProperty("create_index", false);
@@ -63,6 +69,7 @@ public class Defaults {
         }
         REFERENCE_FASTA   = getFileProperty("reference_fasta", null);
         EBI_REFERENCE_SEVICE_URL_MASK = "http://www.ebi.ac.uk/ena/cram/md5/%s" ;
+        CUSTOM_READER_FACTORY = getStringProperty("custom_reader", "");
     }
 
     /** Gets a string system property, prefixed with "samjdk." using the default if the property does not exist.*/
